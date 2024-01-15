@@ -9,6 +9,22 @@ const tracer = trace.getTracer('paymentservice');
 const meter = metrics.getMeter('paymentservice');
 const transactionsCounter = meter.createCounter('app.payment.transactions')
 
+const mysql = require('mysql2');
+const { log } = require('@grpc/grpc-js/build/src/logging');
+const dbConfig = {
+  host: '',
+  user: '',
+  password: '',
+  database: '',
+};
+
+const pool = mysql.createPool(dbConfig);
+const promisePool = pool.promise();
+
+const paymentMethods = ['cash', 'credit_card', 'debit_card'];
+
+const util = require('util');
+
 module.exports.charge = request => {
   const span = tracer.startSpan('charge');
 
