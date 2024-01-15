@@ -41,10 +41,8 @@ async function pollSQSQueue() {
               creditCardNumber: body.credit_card.credit_card_number,
               creditCardExpirationYear: body.credit_card.credit_card_expiration_year,
               creditCardExpirationMonth: body.credit_card.credit_card_expiration_month,
-              // ... include other necessary properties ...
             },
             amount: body.amount,
-            // ... include other necessary properties ...
           };
           // Process the payment with the correctly structured object
           const response = charge.charge(transformedBody);
