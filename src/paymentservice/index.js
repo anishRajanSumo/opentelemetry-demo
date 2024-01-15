@@ -10,7 +10,7 @@ AWS.config.update({ region: 'us-west-2' });
 const sqs = new AWS.SQS({ apiVersion: '2012-11-05' });
 
 // SQS Queue URL
-const queueUrl = 'https://sqs.us-west-2.amazonaws.com/763531136282/test-queue';
+const queueUrl = '';
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
