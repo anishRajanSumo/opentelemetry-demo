@@ -42,6 +42,9 @@ import (
 	pb "github.com/open-telemetry/opentelemetry-demo/src/checkoutservice/genproto/oteldemo"
 	"github.com/open-telemetry/opentelemetry-demo/src/checkoutservice/kafka"
 	"github.com/open-telemetry/opentelemetry-demo/src/checkoutservice/money"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/sqs"
 )
 
 //go:generate go install google.golang.org/protobuf/cmd/protoc-gen-go
@@ -52,6 +55,7 @@ var log *logrus.Logger
 var tracer trace.Tracer
 var resource *sdkresource.Resource
 var initResourcesOnce sync.Once
+var sqsClient *sqs.SQS
 
 func init() {
 	log = logrus.New()
@@ -65,6 +69,23 @@ func init() {
 		TimestampFormat: time.RFC3339Nano,
 	}
 	log.Out = os.Stdout
+	sess := session.Must(session.NewSessionWithOptions(session.Options{
+		Config: aws.Config{
+			Region: aws.String("us-west-2"), // replace with your region
+		},
+	}))
+	sqsClient = sqs.New(sess)
+	log.Info("SQS session created successfully")
+
+	// sess, err := session.NewSession(&aws.Config{
+	// 	Region: aws.String("us-west-2"), // Replace with your AWS region
+	// })
+	// if err != nil {
+	// 	fmt.Println("Error initializing AWS session:", err)
+	// 	return
+	// }
+	// sqsClient = sqs.New(sess)
+	// log.Info("SQS session created successfully")
 }
 
 func initResource() *sdkresource.Resource {
@@ -432,19 +453,30 @@ func (cs *checkoutService) convertCurrency(ctx context.Context, from *pb.Money, 
 }
 
 func (cs *checkoutService) chargeCard(ctx context.Context, amount *pb.Money, paymentInfo *pb.CreditCardInfo) (string, error) {
-	conn, err := createClient(ctx, cs.paymentSvcAddr)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect payment service: %+v", err)
+	message := map[string]interface{}{
+		"amount":      amount,
+		"credit_card": paymentInfo,
 	}
-	defer conn.Close()
+	messageBytes, err := json.Marshal(message)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal payment info: %+v", err)
+	}
+	queueURL := os.Getenv("SQS_QUEUE_URL")
+	if queueURL == "" {
+		return "", fmt.Errorf("SQS_QUEUE_URL environment variable is not set")
+	}
+	// Send the message to the SQS queue instead of SNS topic
+	sendParams := &sqs.SendMessageInput{
+		MessageBody: aws.String(string(messageBytes)),
+		QueueUrl:    aws.String(queueURL), // replace with your SQS queue URL
+	}
+	sendResult, err := sqsClient.SendMessage(sendParams)
+	if err != nil {
+		return "", fmt.Errorf("failed to send payment message to SQS: %+v", err)
+	}
+	// Return the message ID as the transaction ID
+	return *sendResult.MessageId, nil
 
-	paymentResp, err := pb.NewPaymentServiceClient(conn).Charge(ctx, &pb.ChargeRequest{
-		Amount:     amount,
-		CreditCard: paymentInfo})
-	if err != nil {
-		return "", fmt.Errorf("could not charge the card: %+v", err)
-	}
-	return paymentResp.GetTransactionId(), nil
 }
 
 func (cs *checkoutService) sendOrderConfirmation(ctx context.Context, email string, order *pb.OrderResult) error {

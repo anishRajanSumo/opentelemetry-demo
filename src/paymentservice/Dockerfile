@@ -8,7 +8,9 @@ WORKDIR /usr/src/app/
 
 COPY ./src/paymentservice/package*.json ./
 
-RUN apk add --no-cache python3 make g++ && npm ci --omit=dev
+RUN apk add --no-cache python3 make g++ && \
+    npm ci --omit=dev && \
+    npm install mysql2  # Add this line to install mysql2
 
 # -----------------------------------------------------------------------------
 
