@@ -1,7 +1,13 @@
-const { trace, SpanKind, context } = require('@opentelemetry/api')
+const { trace, SpanKind, context, metrics } = require('@opentelemetry/api')
 const { v4: uuidv4 } = require('uuid')
+const logger = require('./logger')
 
 const tracer = trace.getTracer('paymentservice')
+const meter = metrics.getMeter('paymentservice')
+const transactionsCounter = meter.createCounter('app.payment.transactions')
+
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CAD']
+const CARD_TYPES = ['visa', 'mastercard']
 
 const SQS_ATTRS = {
   'messaging.url': process.env.SQS_QUEUE_URL || 'https://sqs.us-west-2.amazonaws.com/224064240808/pdet-otel-demo',
@@ -42,8 +48,25 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function generateFakeBody() {
+  const cardNumber = '4' + Array.from({length: 15}, () => randomInt(0, 9)).join('')
+  return {
+    credit_card: {
+      credit_card_number: cardNumber,
+      credit_card_expiration_year: new Date().getFullYear() + randomInt(1, 5),
+      credit_card_expiration_month: randomInt(1, 12),
+    },
+    amount: {
+      units: randomInt(10, 9999),
+      nanos: randomInt(0, 999999999),
+      currency_code: CURRENCIES[randomInt(0, CURRENCIES.length)],
+    },
+  }
+}
+
 async function generateTransaction(config) {
   const ip = randomIP()
+  let response = {}
 
   const rootSpan = tracer.startSpan('pdet-otel-demo receive', {
     kind: SpanKind.CONSUMER,
@@ -96,7 +119,7 @@ async function generateTransaction(config) {
     postSpan.setStatus({ code: 0 })
     postSpan.end()
 
-    const chargeResult = await generateChargeSpan(config)
+    response = await generateChargeSpan(config)
 
     if (randomInt(1, 4) === 2) {
       await generateMySQLInsertSpan(config)
@@ -108,13 +131,22 @@ async function generateTransaction(config) {
   rootSpan.setAttribute('http.status_code', 200)
   rootSpan.setStatus({ code: 0 })
   rootSpan.end()
+
+  return response
 }
 
 async function generateChargeSpan(config) {
+  const transactionId = uuidv4()
+  const cardType = CARD_TYPES[randomInt(0, CARD_TYPES.length)]
+  const lastFourDigits = String(randomInt(1000, 9999))
+  const currencyCode = CURRENCIES[randomInt(0, CURRENCIES.length)]
+  const units = randomInt(10, 9999)
+  const nanos = randomInt(0, 999999999)
+
   const chargeSpan = tracer.startSpan('charge', {
     kind: SpanKind.INTERNAL,
     attributes: {
-      'app.payment.card_type': 'visa',
+      'app.payment.card_type': cardType,
       'app.payment.card_valid': 'true',
       'app.payment.charged': 'true',
     },
@@ -123,6 +155,11 @@ async function generateChargeSpan(config) {
   const chargeDuration = config.mode === 'chaos' ? randomInt(1200, 1600) : randomInt(0, 7)
   await sleep(chargeDuration)
   chargeSpan.end()
+
+  logger.info({transactionId, cardType, lastFourDigits, amount: { units, nanos, currencyCode }}, "Transaction complete.")
+  transactionsCounter.add(1, {"app.payment.currency": currencyCode})
+
+  return { transactionId }
 }
 
 async function generateMySQLInsertSpan(config) {
@@ -179,4 +216,4 @@ async function generateSQSDeleteSpan() {
   deleteSpan.end()
 }
 
-module.exports = { generateTransaction, sleep, randomInt }
+module.exports = { generateTransaction, generateFakeBody, sleep, randomInt }

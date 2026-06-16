@@ -1,4 +1,4 @@
-const { generateTransaction, sleep, randomInt } = require('./generator')
+const { generateTransaction, sleep, randomInt, generateFakeBody } = require('./generator')
 const logger = require('./logger')
 
 const CONFIG = {
@@ -11,11 +11,12 @@ async function main() {
 
   while (true) {
     try {
-      logger.info("Charge request received from SQS.")
-      await generateTransaction(CONFIG)
-      logger.info("Charge processed successfully.")
+      const body = generateFakeBody()
+      logger.info({ body }, "Charge request received from SQS.")
+      const response = await generateTransaction(CONFIG)
+      logger.info({ response }, "Charge processed successfully.")
     } catch (err) {
-      logger.error({ err }, "Error generating transaction trace.")
+      logger.error({ err }, "Error processing charge.")
     }
 
     const intervalMs = Math.floor(60000 / CONFIG.ratePerMinute) + randomInt(-500, 500)
