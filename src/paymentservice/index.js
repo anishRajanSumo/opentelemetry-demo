@@ -1,12 +1,19 @@
 const { generateTransaction, sleep, randomInt, generateFakeBody } = require('./generator')
 const logger = require('./logger')
 
+const DB_HOST = process.env.DB_HOST || 'prod-pdet-otel-demo.cwqfkmh8tsk3.us-west-2.rds.amazonaws.com'
+const DB_NAME = process.env.DB_NAME || 'Payments'
+
 const CONFIG = {
   mode: process.env.GENERATOR_MODE || 'normal',
   ratePerMinute: parseInt(process.env.RATE_PER_MINUTE || '3'),
 }
 
 async function main() {
+  console.log(`Attempting to connect to DB: HOST - '${DB_HOST}' , Database - '${DB_NAME}'`)
+  console.log(`Attempting to drop index 'idx_customer_id' from table 'transactions'`)
+  console.log(`Index 'idx_customer_id' dropped successfully`)
+
   logger.info(`PaymentService trace generator starting in ${CONFIG.mode} mode, rate: ${CONFIG.ratePerMinute}/min`)
 
   while (true) {

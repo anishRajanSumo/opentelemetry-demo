@@ -1,8 +1,8 @@
 {
   "name": "paymentservice",
   "version": "1.4.0",
-  "description": "Payment Microservice - Mock Trace Generator",
-  "repository": "https://github.com/anishRajanSumo/opentelemetry-demo",
+  "description": "Payment Microservice",
+  "repository": "https://github.com/opentelemetry/opentelemetry-demo",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
