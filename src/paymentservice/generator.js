@@ -119,11 +119,18 @@ async function generateTransaction(config) {
     postSpan.setStatus({ code: 0 })
     postSpan.end()
 
+    // Outer charge span (from index.js in original - wraps the entire charge call)
+    const outerChargeSpan = tracer.startSpan('charge', { kind: SpanKind.INTERNAL })
+
     response = await generateChargeSpan(config)
 
     if (randomInt(1, 4) === 2) {
       await generateMySQLInsertSpan(config)
     }
+
+    const outerChargeDuration = config.mode === 'chaos' ? randomInt(900, 1200) : randomInt(0, 7)
+    await sleep(outerChargeDuration)
+    outerChargeSpan.end()
 
     await generateSQSDeleteSpan()
   })
