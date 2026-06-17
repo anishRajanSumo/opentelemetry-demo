@@ -89,6 +89,13 @@ async function generateTransaction(config) {
         'net.peer.name': 'sqs.us-west-2.amazonaws.com',
         'net.peer.port': '443',
         'net.peer.ip': ip,
+        'http.method': 'POST',
+        'http.url': 'https://sqs.us-west-2.amazonaws.com/',
+        'http.host': 'sqs.us-west-2.amazonaws.com:443',
+        'http.target': '/',
+        'http.flavor': '1.1',
+        'http.status_code': '200',
+        'http.status_text': 'OK',
       },
     })
 
