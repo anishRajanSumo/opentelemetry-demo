@@ -222,6 +222,7 @@ async function generateSQSDeleteSpan() {
       'aws.region': 'us-west-2',
       'aws.request.id': uuidv4(),
       'rpc.method': 'DeleteMessage',
+      'http.status_code': '200',
     },
   })
 
