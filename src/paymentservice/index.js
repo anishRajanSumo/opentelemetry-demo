@@ -120,7 +120,8 @@ async function pollSQSQueue() {
 
           span.end(); // End the span successfully
         } catch (err) {
-          logger.error({ err }, "Error processing charge.");
+          logger.error("Error processing charge.");
+          // logger.error({ err }, "Error processing charge.");
 
           span.recordException(err);
           span.setStatus({ code: opentelemetry.SpanStatusCode.ERROR });
