@@ -20,7 +20,7 @@ const dbConfig = {
   database: process.env.DB_TABLE,
 };
 
-console.log(`Attempting to connect to DB: HOST - '${dbConfig.host}' , Database - '${dbConfig.database}'`);
+console.log(`Attempting to connect to AWS: HOST - '${dbConfig.host}' , Database - '${dbConfig.database}'`);
 const pool = mysql.createPool(dbConfig);
 const promisePool = pool.promise();
 
@@ -171,11 +171,15 @@ async function insertCreditCardDetails(transactionId, cardDetails) {
       console.log("WARNING: Inserting user details taking a lot of time")
     }
     else if(endTime - startTime>3600){
-      console.log("ERROR: Error in Inserting user details for user id:",uuidv4())
+      console.log("ERROR: Error in Inserting user details caused by ER_LOCK_WAIT_TIMEOUT from MySQL. Looks like there is some slow query or transaction or index related issue in MySQL. user id:",uuidv4())
     }
     return endTime - startTime;
   } catch (error) {
-    console.error('Error inserting credit card details:', error);
+    if (error.message && error.message.includes('ECONNREFUSED')) {
+      console.error('Error inserting credit card details caused by ER_LOCK_WAIT_TIMEOUT from MySQL. Looks like there is some slow query or transaction or index related issue in MySQL.');
+    } else {
+      console.error('Error inserting credit card details:', error);
+    }
   }
 }
 

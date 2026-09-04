@@ -129,7 +129,7 @@ async function pollSQSQueue() {
       }
     }
   } catch (error) {
-    logger.error('No more messages in SQS ', error);
+    logger.error({ err: error }, 'No more messages in SQS');
   }
 
   // Continue polling for new messages
