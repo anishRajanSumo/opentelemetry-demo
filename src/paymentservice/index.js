@@ -91,41 +91,32 @@ async function pollSQSQueue() {
         const body = JSON.parse(message.Body);
         logger.info({ body }, "Charge request received from SQS.");
 
-        // Start a span for the charge operation
-        const span = opentelemetry.trace.getTracer('paymentservice').startSpan('charge');
+        // Start an active span for the charge operation so context propagates
+        await opentelemetry.trace.getTracer('paymentservice').startActiveSpan('charge', async (span) => {
+          try {
+            // Process the payment
+            const transformedBody = {
+              creditCard: {
+                creditCardNumber: body.credit_card.credit_card_number,
+                creditCardExpirationYear: body.credit_card.credit_card_expiration_year,
+                creditCardExpirationMonth: body.credit_card.credit_card_expiration_month,
+              },
+              amount: body.amount,
+            };
 
-        try {
-          // Process the payment
-          const transformedBody = {
-            creditCard: {
-              creditCardNumber: body.credit_card.credit_card_number,
-              creditCardExpirationYear: body.credit_card.credit_card_expiration_year,
-              creditCardExpirationMonth: body.credit_card.credit_card_expiration_month,
-              // ... include other necessary properties ...
-            },
-            amount: body.amount,
-            // ... include other necessary properties ...
-          };
+            // Process the payment with the correctly structured object
+            const response = await charge.charge(transformedBody);
+            logger.info({ response }, "Charge processed successfully.");
 
-          // Process the payment with the correctly structured object
-          const response = charge.charge(transformedBody);
-          logger.info({ response }, "Charge processed successfully.");
-          const delay_time = getRandomInt(1,1500)
-          // await delay(delay_time)
-          // // Delete the message from the queue if the charge was successful
-          // await sqs.deleteMessage({
-          //   QueueUrl: queueUrl,
-          //   ReceiptHandle: message.ReceiptHandle
-          // }).promise();
+            span.end();
+          } catch (err) {
+            logger.error({ err }, "Error processing charge.");
 
-          span.end(); // End the span successfully
-        } catch (err) {
-          logger.error({ err }, "Error processing charge.");
-
-          span.recordException(err);
-          span.setStatus({ code: opentelemetry.SpanStatusCode.ERROR });
-          span.end(); // End the span with an error
-        }
+            span.recordException(err);
+            span.setStatus({ code: opentelemetry.SpanStatusCode.ERROR });
+            span.end();
+          }
+        });
       }
     }
   } catch (error) {
