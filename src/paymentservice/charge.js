@@ -1,6 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
-const {context, propagation, trace, metrics} = require('@opentelemetry/api');
+const opentelemetry = require('@opentelemetry/api');
+const {context, propagation, trace, metrics} = opentelemetry;
 const cardValidator = require('simple-card-validator');
 const { v4: uuidv4 } = require('uuid');
 // import CreditCardGenerator, { CreditCardVendor } from 'credit-card-generator';
@@ -20,7 +21,7 @@ const dbConfig = {
   database: process.env.DB_TABLE,
 };
 
-console.log(`Attempting to connect to DB: HOST - '${dbConfig.host}' , Database - '${dbConfig.database}'`);
+console.log(`Attempting to connect to AWS: HOST - '${dbConfig.host}' , Database - '${dbConfig.database}'`);
 const pool = mysql.createPool(dbConfig);
 const promisePool = pool.promise();
 
@@ -29,9 +30,7 @@ const paymentMethods = ['cash', 'credit_card', 'debit_card'];
 const util = require('util');
 const sleep = util.promisify(setTimeout);
 
-module.exports.charge = request => {
-  const span = tracer.startSpan('charge');
-
+module.exports.charge = async (request) => {
   const {
     creditCardNumber: number,
     creditCardExpirationYear: year,
@@ -45,11 +44,6 @@ module.exports.charge = request => {
   const card = cardValidator(number);
   const { card_type: cardType, valid } = card.getCardDetails();
 
-  span.setAttributes({
-    'app.payment.card_type': cardType,
-    'app.payment.card_valid': valid
-  });
-
   if (!valid) {
     throw new Error('Credit card info is invalid.');
   }
@@ -62,22 +56,15 @@ module.exports.charge = request => {
     throw new Error(`The credit card (ending ${lastFourDigits}) expired on ${month}/${year}.`);
   }
 
-  // check baggage for synthetic_request=true, and add charged attribute accordingly
   const baggage = propagation.getBaggage(context.active());
-  if (baggage && baggage.getEntry("synthetic_request") && baggage.getEntry("synthetic_request").value === "true") {
-    span.setAttribute('app.payment.charged', false);
-  } else {
-    span.setAttribute('app.payment.charged', true);
-  }
-
-  span.end();
+  const charged = !(baggage && baggage.getEntry("synthetic_request") && baggage.getEntry("synthetic_request").value === "true");
 
   const { units, nanos, currencyCode } = request.amount;
-  logger.info({transactionId, cardType, lastFourDigits, amount: { units, nanos, currencyCode }}, "Transaction complete.");
   transactionsCounter.add(1, {"app.payment.currency": currencyCode})
 
-  // Insert credit card details into the database
-  insertCreditCardDetails(transactionId, request.creditCard);
+  await insertCreditCardDetails(transactionId, request.creditCard);
+
+  logger.info({transactionId, cardType, lastFourDigits, amount: { units, nanos, currencyCode }}, "Transaction complete.");
   return {transactionId}
 }
 function randomPaymentMethod() {
@@ -139,44 +126,74 @@ async function insertCreditCardDetails(transactionId, cardDetails) {
 
   const card = cardValidator(number);
   const { card_type: cardType, valid } = card.getCardDetails();
-  try {
-    // if(process.env.INDEX_MADE == "no")
-    // {
-    //   await dropIndexIfExists();
-    //   process.env.INDEX_MADE = "yes"
-    // }
-    const startTime = performance.now();
-    await promisePool.execute(`
-    SELECT customer_id, COUNT(*) as transaction_count FROM transactions GROUP BY customer_id HAVING COUNT(*) > 1
-    `);
-    const endTime = performance.now();
-    // Assuming you want to print the number of customers with more than one transaction
-    const randomNumber= getRandomInt(1,3);
-    if(randomNumber == 2)
-    {
-      const insertQuery = `INSERT INTO transactions (customer_id, transaction_id, purchase_date, created_at, payment_method) VALUES (?, ?, ?, ?, ?)`;
-      // Generate random transactions
-      const customerID = uuidv4();
-      const transactionID = uuidv4();
-      const purchaseDate = randomDate();
-      const createdAt = randomDate();
-      const paymentMethod = randomPaymentMethod();
+  await tracer.startActiveSpan('insertCreditCardDetails', { attributes: {
+    'db.system': 'mysql',
+    'db.name': process.env.DB_TABLE,
+    'db.operation': 'INSERT',
+    'app.payment.transaction_id': transactionId,
+  }}, async (dbSpan) => {
+    try {
+      // if(process.env.INDEX_MADE == "no")
+      // {
+      //   await dropIndexIfExists();
+      //   process.env.INDEX_MADE = "yes"
+      // }
+      const startTime = performance.now();
+      await tracer.startActiveSpan('SELECT transactions', { attributes: {
+        'db.system': 'mysql',
+        'db.name': process.env.DB_TABLE,
+        'db.operation': 'SELECT',
+        'db.statement': 'SELECT customer_id, COUNT(*) as transaction_count FROM transactions GROUP BY customer_id HAVING COUNT(*) > 1',
+      }}, async (selectSpan) => {
+        await promisePool.execute(`
+        SELECT customer_id, COUNT(*) as transaction_count FROM transactions GROUP BY customer_id HAVING COUNT(*) > 1
+        `);
+        selectSpan.end();
+      });
+      const endTime = performance.now();
+      const randomNumber= getRandomInt(1,3);
+      if(randomNumber == 2)
+      {
+        const insertQuery = `INSERT INTO transactions (customer_id, transaction_id, purchase_date, created_at, payment_method) VALUES (?, ?, ?, ?, ?)`;
+        const customerID = uuidv4();
+        const transactionID = uuidv4();
+        const purchaseDate = randomDate();
+        const createdAt = randomDate();
+        const paymentMethod = randomPaymentMethod();
 
-      await promisePool.execute(insertQuery, [customerID, transactionID, purchaseDate, createdAt, paymentMethod]);
+        await tracer.startActiveSpan('INSERT transactions', { attributes: {
+          'db.system': 'mysql',
+          'db.name': process.env.DB_TABLE,
+          'db.operation': 'INSERT',
+          'db.statement': 'INSERT INTO transactions (customer_id, transaction_id, purchase_date, created_at, payment_method) VALUES (?, ?, ?, ?, ?)',
+        }}, async (insertSpan) => {
+          await promisePool.execute(insertQuery, [customerID, transactionID, purchaseDate, createdAt, paymentMethod]);
+          const delay_time = getRandomInt(1,1500);
+          await sleep(delay_time);
+          insertSpan.end();
+        });
+      }
+      console.log(`Query execution time: ${endTime - startTime} milliseconds`);
+      if(endTime - startTime>2700 && endTime - startTime <3600)
+      {
+        console.log("WARNING: Inserting user details taking a lot of time")
+      }
+      else if(endTime - startTime>3600){
+        console.log("ERROR: Error in Inserting user details caused by ER_LOCK_WAIT_TIMEOUT from MySQL. Looks like there is some slow query or transaction or index related issue in MySQL. user id:",uuidv4())
+      }
+      dbSpan.end();
+      return endTime - startTime;
+    } catch (error) {
+      dbSpan.recordException(error);
+      dbSpan.setStatus({ code: opentelemetry.SpanStatusCode.ERROR });
+      dbSpan.end();
+      if (error.message && error.message.includes('ECONNREFUSED')) {
+        console.error('Error inserting credit card details caused by ER_LOCK_WAIT_TIMEOUT from MySQL. Looks like there is some slow query or transaction or index related issue in MySQL.');
+      } else {
+        console.error('Error inserting credit card details:', error);
+      }
     }
-    // Use Promise.race to wait for either the insert or timeout
-    console.log(`Query execution time: ${endTime - startTime} milliseconds`);
-    if(endTime - startTime>2700 && endTime - startTime <3600)
-    {
-      console.log("WARNING: Inserting user details taking a lot of time")
-    }
-    else if(endTime - startTime>3600){
-      console.log("ERROR: Error in Inserting user details for user id:",uuidv4())
-    }
-    return endTime - startTime;
-  } catch (error) {
-    console.error('Error inserting credit card details:', error);
-  }
+  });
 }
 
 function getRandomInt(min, max) {
