@@ -141,9 +141,17 @@ async function insertCreditCardDetails(transactionId, cardDetails) {
         process.env.INDEX_MADE = "yes"
       }
       const startTime = performance.now();
-      await promisePool.execute(`
-      SELECT customer_id, COUNT(*) as transaction_count FROM transactions GROUP BY customer_id HAVING COUNT(*) > 1
-      `);
+      await tracer.startActiveSpan('SELECT transactions', { attributes: {
+        'db.system': 'mysql',
+        'db.name': process.env.DB_TABLE,
+        'db.operation': 'SELECT',
+        'db.statement': 'SELECT customer_id, COUNT(*) as transaction_count FROM transactions GROUP BY customer_id HAVING COUNT(*) > 1',
+      }}, async (selectSpan) => {
+        await promisePool.execute(`
+        SELECT customer_id, COUNT(*) as transaction_count FROM transactions GROUP BY customer_id HAVING COUNT(*) > 1
+        `);
+        selectSpan.end();
+      });
       const endTime = performance.now();
       const randomNumber= getRandomInt(1,3);
       if(randomNumber == 2)
@@ -155,7 +163,17 @@ async function insertCreditCardDetails(transactionId, cardDetails) {
         const createdAt = randomDate();
         const paymentMethod = randomPaymentMethod();
 
-        await promisePool.execute(insertQuery, [customerID, transactionID, purchaseDate, createdAt, paymentMethod]);
+        await tracer.startActiveSpan('INSERT transactions', { attributes: {
+          'db.system': 'mysql',
+          'db.name': process.env.DB_TABLE,
+          'db.operation': 'INSERT',
+          'db.statement': 'INSERT INTO transactions (customer_id, transaction_id, purchase_date, created_at, payment_method) VALUES (?, ?, ?, ?, ?)',
+        }}, async (insertSpan) => {
+          await promisePool.execute(insertQuery, [customerID, transactionID, purchaseDate, createdAt, paymentMethod]);
+          const delay_time = getRandomInt(1,1500);
+          await sleep(delay_time);
+          insertSpan.end();
+        });
       }
       console.log(`Query execution time: ${endTime - startTime} milliseconds`);
       if(endTime - startTime>2700 && endTime - startTime <3600)

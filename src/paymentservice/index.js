@@ -107,8 +107,6 @@ async function pollSQSQueue() {
             // Process the payment with the correctly structured object
             const response = await charge.charge(transformedBody);
             logger.info({ response }, "Charge processed successfully.");
-            const delay_time = getRandomInt(1,1500)
-            await delay(delay_time)
             // Delete the message from the queue if the charge was successful
             await sqs.deleteMessage({
               QueueUrl: queueUrl,
