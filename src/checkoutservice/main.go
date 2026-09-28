@@ -465,16 +465,35 @@ func (cs *checkoutService) chargeCard(ctx context.Context, amount *pb.Money, pay
 	if queueURL == "" {
 		return "", fmt.Errorf("SQS_QUEUE_URL environment variable is not set")
 	}
-	// Send the message to the SQS queue instead of SNS topic
+	ctx, span := tracer.Start(ctx, "SQS.SendMessage",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			attribute.String("net.peer.name", "sqs.us-west-2.amazonaws.com"),
+			attribute.String("net.peer.port", "443"),
+			attribute.String("net.transport", "ip_tcp"),
+			attribute.String("http.method", "POST"),
+			attribute.String("http.url", "https://sqs.us-west-2.amazonaws.com/"),
+			attribute.String("http.host", "sqs.us-west-2.amazonaws.com:443"),
+			semconv.PeerService("sqs.us-west-2.amazonaws.com"),
+			semconv.MessagingSystem("aws_sqs"),
+			semconv.MessagingOperationPublish,
+			semconv.MessagingDestinationName(queueURL),
+			attribute.String("messaging.destination.kind", "queue"),
+		),
+	)
+	defer span.End()
+
 	sendParams := &sqs.SendMessageInput{
 		MessageBody: aws.String(string(messageBytes)),
-		QueueUrl:    aws.String(queueURL), // replace with your SQS queue URL
+		QueueUrl:    aws.String(queueURL),
 	}
 	sendResult, err := sqsClient.SendMessage(sendParams)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(2, err.Error())
 		return "", fmt.Errorf("failed to send payment message to SQS: %+v", err)
 	}
-	// Return the message ID as the transaction ID
+	span.SetAttributes(attribute.String("messaging.message.id", *sendResult.MessageId))
 	return *sendResult.MessageId, nil
 
 }
